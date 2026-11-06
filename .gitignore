@@ -2,3 +2,5 @@ map.png
 __pycache__/
 *.pyc
 .venv/
+build/
+lambda.zip
