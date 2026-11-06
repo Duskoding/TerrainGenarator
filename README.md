@@ -93,24 +93,30 @@ Mac or Windows too. On Windows, run it in Git Bash or WSL.
 3. Under **Runtime settings**, click **Edit** and set **Handler** to
    `lambda_function.lambda_handler`. That is the file name, a dot, then the
    function name. (This is the default for new Python functions.)
-4. In **Configuration**, open **General configuration**, click **Edit**, and
-   raise **Memory** to 512 MB and **Timeout** to 30 seconds. The defaults
-   (128 MB, 3 seconds) are too small for numpy.
-5. In **Configuration**, create a **Function URL** with **Auth type** set to
+4. In **Configuration**, create a **Function URL** with **Auth type** set to
    **NONE**.
 
 ### 3. Test it
 
 ```bash
 curl -X POST \
+     -v \
      -H "Content-Type: application/json" \
      -d @request.json \
      urlToYourLambda \
      --output map.png
 ```
 
-You can also open `urlToYourLambda?seed=7&shape=continent` in a browser to see
-the map.
+`--output map.png` is the one addition to the command in the class notes. It is
+needed because the response is an image rather than JSON text.
+
+### If it says "Task timed out"
+
+This step is not in the class notes. It is only needed if you see that error.
+Go to **Configuration**, then **General configuration**, click **Edit**, and
+raise **Timeout** (for example, to 10 seconds) and **Memory** (for example, to
+256 MB). Locally the handler runs in about 0.3 seconds and uses about 40 MB, so
+the defaults should usually be enough.
 
 ### Updating from the command line
 
@@ -133,8 +139,6 @@ aws lambda create-function \
     --function-name yourFunctionName \
     --runtime python3.12 \
     --handler lambda_function.lambda_handler \
-    --memory-size 512 \
-    --timeout 30 \
     --role arn:aws:iam::123456789012:role/your-lambda-role \
     --zip-file fileb://lambda.zip
 ```
