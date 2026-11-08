@@ -63,7 +63,11 @@ step by step, using Python in place of Java:
 
 Send the settings as JSON in a POST body (see `request.json`), or as query
 parameters in a GET request, such as `?seed=7&shape=continent`. Any setting you
-leave out uses its default. Bad settings get a `400` with a message saying what
+leave out uses its default.
+
+**Random maps:** if you leave out `seed`, or send `"seed": "random"`, the Lambda
+picks a random seed, so every request gives a new map. The seed it used comes
+back in the `X-Seed` response header. Send that seed again to get the same map. Bad settings get a `400` with a message saying what
 is wrong.
 
 ### Response

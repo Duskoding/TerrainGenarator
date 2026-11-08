@@ -17,12 +17,15 @@ Handler setting on AWS:  lambda_function.lambda_handler
 import base64
 import io
 import json
+import random
 import traceback
 
 from terrain import DEFAULT_SETTINGS, generate_map
 
 # Keep requests from asking for an image so big that Lambda runs out of memory.
 MAX_IMAGE_PIXELS = 2048
+# Random seeds are picked from 0 up to this number.
+MAX_RANDOM_SEED = 999_999
 
 
 def lambda_handler(event, context):
@@ -42,6 +45,10 @@ def lambda_handler(event, context):
                 body = base64.b64decode(body).decode("utf-8")
             settings.update(json.loads(body))
 
+        # No seed (or "seed": "random") means a brand-new random map.
+        if settings.get("seed", "random") == "random":
+            settings["seed"] = random.randint(0, MAX_RANDOM_SEED)
+
         error = _validate(settings)
         if error:
             return _text_response(400, error)
@@ -55,7 +62,8 @@ def lambda_handler(event, context):
         image.save(buffer, format="PNG")
         return {
             "statusCode": 200,
-            "headers": {"Content-Type": "image/png"},
+            # Send the seed back so a map you like can be made again.
+            "headers": {"Content-Type": "image/png", "X-Seed": str(settings["seed"])},
             "isBase64Encoded": True,
             "body": base64.b64encode(buffer.getvalue()).decode("ascii"),
         }
@@ -72,7 +80,9 @@ def _parse_query_params(query_params):
     settings = {}
     for key, value in query_params.items():
         default = DEFAULT_SETTINGS.get(key, 0 if key.startswith("offset_") else None)
-        if isinstance(default, int):
+        if key == "seed" and value == "random":
+            settings[key] = value
+        elif isinstance(default, int):
             settings[key] = int(value)
         elif isinstance(default, float):
             settings[key] = float(value)
@@ -88,6 +98,8 @@ def _validate(settings):
     if unknown:
         return f"Unknown settings: {sorted(unknown)}. Allowed: {sorted(allowed)}"
     s = {**DEFAULT_SETTINGS, **settings}
+    if not isinstance(s["seed"], int) or isinstance(s["seed"], bool):
+        return 'seed must be a whole number or "random"'
     if s["shape"] not in ("island", "continent"):
         return 'shape must be "island" or "continent"'
     if not (1 <= s["size"] and 1 <= s["scale"] and s["size"] * s["scale"] <= MAX_IMAGE_PIXELS):
