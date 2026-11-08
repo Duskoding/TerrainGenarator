@@ -54,7 +54,7 @@ step by step, using Python in place of Java:
 |---|---|
 | `RequestHandler.handleRequest(event, context)` | `lambda_handler(event, context)` in `lambda_function.py` |
 | Gson turns JSON into objects | Python's built-in `json` module |
-| `./gradlew shadowJar` builds a fat jar | `./build_lambda.sh` builds `lambda.zip` |
+| `./gradlew shadowJar` builds a fat jar | `python build_lambda.py` builds `lambda.zip` |
 | Runtime: Java 21 | Runtime: Python 3.12 |
 | Handler: `com.example.HelloRequestHandler` | Handler: `lambda_function.lambda_handler` |
 | `toResponseEvent(e)` sends back the stack trace | Same: status 500 with the stack trace |
@@ -77,12 +77,13 @@ it back into an image before it reaches you.
 The Python version of building a fat jar:
 
 ```bash
-./build_lambda.sh
+python build_lambda.py
 ```
 
-This creates `lambda.zip` (about 28 MB), which holds the code plus numpy and
+This creates `lambda.zip` (about 24 MB), which holds the code plus numpy and
 Pillow. The packages are downloaded for Linux, so it works when you build on a
-Mac or Windows too. On Windows, run it in Git Bash or WSL.
+Mac or Windows too. You can also right-click `build_lambda.py` in PyCharm and
+choose **Run**.
 
 ### 2. Create the Lambda on AWS
 
@@ -123,7 +124,7 @@ the defaults should usually be enough.
 After you change the code, rebuild the zip and upload it:
 
 ```bash
-./build_lambda.sh
+python build_lambda.py
 ```
 
 ```bash
