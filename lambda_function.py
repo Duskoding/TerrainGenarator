@@ -11,6 +11,9 @@ This is the Python version of the Java RequestHandler from the class notes
   5. If anything goes wrong, print the stack trace to the AWS log and send it
      back to the client with status 500 (same as toResponseEvent in the notes).
 
+It also serves the explore page: open <function url>/explore to walk around
+a world map one tile at a time.
+
 Handler setting on AWS:  lambda_function.lambda_handler
 """
 
@@ -19,13 +22,21 @@ import io
 import json
 import random
 import traceback
+from pathlib import Path
 
-from terrain import DEFAULT_SETTINGS, generate_map
+from terrain import DEFAULT_SETTINGS, generate_map, map_dimensions, tile_grid
 
 # Keep requests from asking for an image so big that Lambda runs out of memory.
 MAX_IMAGE_PIXELS = 2048
+# The whole map is generated even for one tile, so cap its size too.
+MAX_MAP_CELLS = 1024
 # Random seeds are picked from 0 up to this number.
 MAX_RANDOM_SEED = 999_999
+# Settings that are whole numbers but have no number default (default None)
+INT_SETTINGS = {"width", "height", "tile_x", "tile_y", "offset_x", "offset_y"}
+
+# Read the explore page once, when Lambda starts (not on every request)
+EXPLORE_PAGE = (Path(__file__).parent / "explore.html").read_text(encoding="utf-8")
 
 
 def lambda_handler(event, context):
@@ -36,6 +47,10 @@ def lambda_handler(event, context):
         # Like in Java, this is None if the request has no query parameters.
         query_params = event.get("queryStringParameters")
         body = event.get("body")
+        path = event.get("rawPath", "/")
+
+        if path.rstrip("/") == "/explore":
+            return _explore_page_response()
 
         settings = {}
         if query_params:
@@ -79,10 +94,10 @@ def _parse_query_params(query_params):
     numbers (e.g. "0.4" -> 0.4) to match the types in DEFAULT_SETTINGS."""
     settings = {}
     for key, value in query_params.items():
-        default = DEFAULT_SETTINGS.get(key, 0 if key.startswith("offset_") else None)
+        default = DEFAULT_SETTINGS.get(key)
         if key == "seed" and value == "random":
             settings[key] = value
-        elif isinstance(default, int):
+        elif key in INT_SETTINGS or isinstance(default, int):
             settings[key] = int(value)
         elif isinstance(default, float):
             settings[key] = float(value)
@@ -100,13 +115,43 @@ def _validate(settings):
     s = {**DEFAULT_SETTINGS, **settings}
     if not isinstance(s["seed"], int) or isinstance(s["seed"], bool):
         return 'seed must be a whole number or "random"'
-    if s["shape"] not in ("island", "continent"):
-        return 'shape must be "island" or "continent"'
-    if not (1 <= s["size"] and 1 <= s["scale"] and s["size"] * s["scale"] <= MAX_IMAGE_PIXELS):
-        return f"size * scale must be between 1 and {MAX_IMAGE_PIXELS}"
+    if s["shape"] not in ("island", "continent", "world"):
+        return 'shape must be "island", "continent", or "world"'
+    for key in INT_SETTINGS:
+        if s.get(key) is not None and not isinstance(s[key], int):
+            return f"{key} must be a whole number"
+    if s["size"] < 1 or s["scale"] < 1 or s["tile_size"] < 1:
+        return "size, scale, and tile_size must be at least 1"
+    width, height = map_dimensions(s)
+    if width > MAX_MAP_CELLS or height > MAX_MAP_CELLS:
+        return f"the map can be at most {MAX_MAP_CELLS} cells across"
+    if (s["tile_x"] is None) != (s["tile_y"] is None):
+        return "send both tile_x and tile_y, or neither"
+    if s["tile_x"] is not None:
+        columns, rows = tile_grid(s)
+        if not (0 <= s["tile_x"] < columns and 0 <= s["tile_y"] < rows):
+            return f"this map has {columns} x {rows} tiles: tile_x 0-{columns - 1}, tile_y 0-{rows - 1}"
+        width = height = s["tile_size"]
+    if width * s["scale"] > MAX_IMAGE_PIXELS or height * s["scale"] > MAX_IMAGE_PIXELS:
+        return f"the image can be at most {MAX_IMAGE_PIXELS} pixels across (lower scale or size)"
     if s["mountain_height"] <= 0:
         return "mountain_height must be greater than 0"
     return None
+
+
+def _explore_page_response():
+    """The explore page needs to know how many tiles the default world has."""
+    world = {**DEFAULT_SETTINGS, "shape": "world"}
+    columns, rows = tile_grid(world)
+    html = (EXPLORE_PAGE
+            .replace("{{COLUMNS}}", str(columns))
+            .replace("{{ROWS}}", str(rows))
+            .replace("{{MAX_SEED}}", str(MAX_RANDOM_SEED)))
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "text/html; charset=utf-8"},
+        "body": html,
+    }
 
 
 def _text_response(status_code, message):

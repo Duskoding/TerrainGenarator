@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terrain Explorer</title>
+<style>
+  :root {
+    --bg: #1d2330;
+    --panel: #272f3f;
+    --text: #eef1f6;
+    --muted: #a7b0c0;
+    --accent: #f2c14e;
+    --parchment: #d9c9a3;
+    --parchment-line: #c4b186;
+    --danger: #ff8a80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 16px;
+    display: grid;
+    gap: 16px;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    align-items: start;
+  }
+  @media (max-width: 820px) {
+    main { grid-template-columns: minmax(0, 1fr); }
+  }
+  header {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+  }
+  h1 { font-size: 22px; margin: 0; margin-right: auto; }
+  .seed { color: var(--muted); }
+  .seed strong { color: var(--text); font-variant-numeric: tabular-nums; }
+  button {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid #3b465c;
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.3; cursor: default; }
+  .panel {
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 12px;
+  }
+
+  /* Tile view with arrow buttons around it */
+  .viewer {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    grid-template-rows: 44px auto 44px;
+    gap: 6px;
+  }
+  .viewer .north { grid-column: 2; grid-row: 1; }
+  .viewer .west  { grid-column: 1; grid-row: 2; }
+  .viewer .east  { grid-column: 3; grid-row: 2; }
+  .viewer .south { grid-column: 2; grid-row: 3; }
+  .viewer button { padding: 0; font-size: 20px; }
+  .tile {
+    grid-column: 2;
+    grid-row: 2;
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--parchment);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .tile img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    image-rendering: pixelated;
+  }
+  .status {
+    position: absolute;
+    inset: auto 8px 8px auto;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .status.error { color: var(--danger); inset: 8px; text-align: center; }
+  .where { margin: 8px 0 0; text-align: center; color: var(--muted); }
+
+  /* Overview map that fills in as you explore */
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  canvas {
+    width: 100%;
+    display: block;
+    image-rendering: pixelated;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .help { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Terrain Explorer</h1>
+    <span class="seed">Seed <strong id="seed"></strong></span>
+    <button id="new-world">New world</button>
+  </header>
+
+  <section class="panel">
+    <div class="viewer">
+      <button class="north" data-dx="0" data-dy="-1" aria-label="Go north">&#9650;</button>
+      <button class="west" data-dx="-1" data-dy="0" aria-label="Go west">&#9664;</button>
+      <div class="tile">
+        <img id="tile" alt="The current map tile">
+        <div class="status" id="status" hidden></div>
+      </div>
+      <button class="east" data-dx="1" data-dy="0" aria-label="Go east">&#9654;</button>
+      <button class="south" data-dx="0" data-dy="1" aria-label="Go south">&#9660;</button>
+    </div>
+    <p class="where" id="where"></p>
+  </section>
+
+  <section class="panel">
+    <h2>World map <span class="seed" id="explored"></span></h2>
+    <canvas id="overview"></canvas>
+    <p class="help">
+      Move with the arrow buttons, arrow keys, or WASD. Tiles you visit are
+      drawn on the world map. Click an explored tile to jump back to it.
+    </p>
+  </section>
+</main>
+
+<script>
+  // These numbers are filled in by the Lambda when it sends this page.
+  const COLUMNS = {{COLUMNS}};
+  const ROWS = {{ROWS}};
+  const MAX_SEED = {{MAX_SEED}};
+  const TILE_SCALE = 8;   // each tile cell becomes 8x8 pixels in the big view
+  const CELL = 40;        // size of one tile on the world map, in pixels
+
+  const tileImg = document.getElementById("tile");
+  const statusEl = document.getElementById("status");
+  const canvas = document.getElementById("overview");
+  const ctx = canvas.getContext("2d");
+  canvas.width = COLUMNS * CELL;
+  canvas.height = ROWS * CELL;
+
+  // ---- Which world are we in? ----------------------------------------------
+  // The seed comes from the link (?seed=123) so a world can be shared.
+  const params = new URLSearchParams(location.search);
+  let seed = parseInt(params.get("seed"), 10);
+  if (!(seed >= 0)) {
+    seed = Math.floor(Math.random() * (MAX_SEED + 1));
+  }
+  params.set("seed", seed);
+  history.replaceState(null, "", "?" + params);
+  document.getElementById("seed").textContent = seed;
+
+  // ---- Remember explored tiles (per seed) ----------------------------------
+  const storageKey = "terrain-explored-" + seed;
+  const explored = new Set();
+  const tileImages = {};   // "x,y" -> small image used on the world map
+
+  function loadExplored() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      saved.forEach((key) => explored.add(key));
+    } catch (e) {
+      // Storage can be blocked (private mode); exploring still works.
+    }
+  }
+
+  function saveExplored() {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify([...explored]));
+    } catch (e) {
+      // Ignore: the map just won't be remembered next time.
+    }
+  }
+
+  // ---- Talking to the Lambda -----------------------------------------------
+  function tileUrl(x, y, scale) {
+    return "/?shape=world&seed=" + seed + "&tile_x=" + x + "&tile_y=" + y + "&scale=" + scale;
+  }
+
+  // ---- Drawing the world map -----------------------------------------------
+  function drawOverview() {
+    ctx.imageSmoothingEnabled = false;
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLUMNS; x++) {
+        const key = x + "," + y;
+        const img = tileImages[key];
+        if (img && img.complete && img.naturalWidth) {
+          ctx.drawImage(img, x * CELL, y * CELL, CELL, CELL);
+        } else {
+          // Unexplored: blank parchment
+          ctx.fillStyle = getCss("--parchment");
+          ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+          ctx.strokeStyle = getCss("--parchment-line");
+          ctx.strokeRect(x * CELL + 0.5, y * CELL + 0.5, CELL - 1, CELL - 1);
+        }
+      }
+    }
+    // Outline where you are now
+    ctx.strokeStyle = "#e53935";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(pos.x * CELL + 1.5, pos.y * CELL + 1.5, CELL - 3, CELL - 3);
+    ctx.lineWidth = 1;
+    document.getElementById("explored").textContent =
+      "(" + explored.size + " / " + COLUMNS * ROWS + " explored)";
+  }
+
+  function getCss(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function addToOverview(x, y, src) {
+    const key = x + "," + y;
+    if (tileImages[key]) {
+      return;
+    }
+    const img = new Image();
+    img.onload = drawOverview;
+    img.src = src;
+    tileImages[key] = img;
+  }
+
+  // ---- Moving around --------------------------------------------------------
+  const pos = { x: Math.floor(COLUMNS / 2), y: Math.floor(ROWS / 2) };
+
+  function goTo(x, y) {
+    if (x < 0 || y < 0 || x >= COLUMNS || y >= ROWS) {
+      return;
+    }
+    pos.x = x;
+    pos.y = y;
+    const src = tileUrl(x, y, TILE_SCALE);
+    showStatus("Loading…");
+    tileImg.src = src;
+    tileImg.onload = () => {
+      hideStatus();
+      explored.add(x + "," + y);
+      saveExplored();
+      addToOverview(x, y, src);
+      drawOverview();
+      preloadNeighbors();
+    };
+    tileImg.onerror = () => showStatus("Could not load this tile. Try again.", true);
+
+    document.getElementById("where").textContent =
+      "Tile " + x + ", " + y + " of " + COLUMNS + " × " + ROWS;
+    document.querySelectorAll(".viewer button").forEach((button) => {
+      const nx = x + Number(button.dataset.dx);
+      const ny = y + Number(button.dataset.dy);
+      button.disabled = nx < 0 || ny < 0 || nx >= COLUMNS || ny >= ROWS;
+    });
+    drawOverview();
+  }
+
+  // Ask for the neighboring tiles early so moving feels instant.
+  function preloadNeighbors() {
+    [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(([dx, dy]) => {
+      const nx = pos.x + dx;
+      const ny = pos.y + dy;
+      if (nx >= 0 && ny >= 0 && nx < COLUMNS && ny < ROWS) {
+        new Image().src = tileUrl(nx, ny, TILE_SCALE);
+      }
+    });
+  }
+
+  function showStatus(message, isError) {
+    statusEl.textContent = message;
+    statusEl.classList.toggle("error", Boolean(isError));
+    statusEl.hidden = false;
+  }
+
+  function hideStatus() {
+    statusEl.hidden = true;
+  }
+
+  document.querySelectorAll(".viewer button").forEach((button) => {
+    button.addEventListener("click", () => {
+      goTo(pos.x + Number(button.dataset.dx), pos.y + Number(button.dataset.dy));
+    });
+  });
+
+  const KEYS = {
+    ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+    w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0],
+  };
+  document.addEventListener("keydown", (event) => {
+    const move = KEYS[event.key] || KEYS[event.key.toLowerCase()];
+    if (move) {
+      event.preventDefault();
+      goTo(pos.x + move[0], pos.y + move[1]);
+    }
+  });
+
+  canvas.addEventListener("click", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((event.clientX - rect.left) / rect.width * COLUMNS);
+    const y = Math.floor((event.clientY - rect.top) / rect.height * ROWS);
+    if (explored.has(x + "," + y)) {
+      goTo(x, y);
+    }
+  });
+
+  document.getElementById("new-world").addEventListener("click", () => {
+    location.search = "";   // reload without a seed = new random world
+  });
+
+  // ---- Start ---------------------------------------------------------------
+  loadExplored();
+  explored.forEach((key) => {
+    const [x, y] = key.split(",").map(Number);
+    addToOverview(x, y, tileUrl(x, y, 1));   // small version for the map
+  });
+  goTo(pos.x, pos.y);
+</script>
+</body>
+</html>

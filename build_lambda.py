@@ -15,7 +15,7 @@ import zipfile
 from pathlib import Path
 
 PYTHON_VERSION = "3.12"  # must match the Lambda runtime (Python 3.12)
-CODE_FILES = ["terrain.py", "lambda_function.py"]
+CODE_FILES = ["terrain.py", "lambda_function.py", "explore.html"]
 
 project = Path(__file__).resolve().parent
 build_dir = project / "build" / "package"

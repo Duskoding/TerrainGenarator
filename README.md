@@ -29,13 +29,43 @@ Pass any of these to `generate_map(settings)`. Settings you leave out use the de
 | `water_level` | 0.40 | 0 to 1: how much of the map is water |
 | `mountain_height` | 1.0 | 0.5 = flat, 1 = normal, 2 = very mountainous |
 | `roughness` | 0.5 | 0 to 1: how jagged the terrain is |
-| `shape` | `"island"` | `"island"` or `"continent"` |
+| `shape` | `"island"` | `"island"`, `"continent"`, or `"world"` |
+| `width`, `height` | none | World maps only: cells across and down (default `size * 4` by `size * 2`) |
+| `tile_x`, `tile_y` | none | Return only this tile (column, row), counting from 0 at the top left |
+| `tile_size` | 64 | Tile width and height in cells |
 | `offset_x`, `offset_y` | 0 | World position, so neighboring tiles line up |
 
 ```python
 from terrain import generate_map
 generate_map({"seed": 7, "shape": "continent"}).save("continent.png")
 ```
+
+## World maps and tiles
+
+`"shape": "world"` makes a whole world: a wide map with several continents,
+open ocean, and ice at the top and bottom like the poles. With the default
+`size` of 128 it is 512 x 256 cells, split into 8 x 4 tiles of 64 x 64 cells.
+
+Send `tile_x` and `tile_y` to get one tile:
+
+```python
+generate_map({"shape": "world", "seed": 7, "tile_x": 3, "tile_y": 1})
+```
+
+The whole world is always generated first and then cut into the tile you asked
+for, so tiles from the same seed line up perfectly at their edges.
+
+### Explore page
+
+Open `urlToYourLambda/explore` in a browser to walk around a world one tile at
+a time, like a map in an exploration game:
+
+- Move with the arrow buttons, the arrow keys, or WASD.
+- The world map starts blank (parchment) and fills in as you visit tiles. It
+  remembers what you explored, separately for each seed.
+- Click an explored tile on the world map to jump back to it.
+- **New world** picks a random seed. The seed is in the page link
+  (`/explore?seed=7`), so you can share a world with someone.
 
 ## How it works
 
